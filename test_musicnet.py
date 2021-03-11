@@ -17,7 +17,8 @@ from datetime import date
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root', type=str, default='Datasets/musicnet')
-parser.add_argument('--model_path', type=str, default='Models/musicnet_aug_6L.pth')
+parser.add_argument('--model_path', type=str,
+                    default='Models/musicnet_aug_6L.pth')
 parser.add_argument('--framesize', type=int, default=16384)
 parser.add_argument('--batch', type=int, default=128)
 parser.add_argument('--snr', type=float, help='pink noise in dB.')
@@ -25,7 +26,7 @@ parser.add_argument('--snr', type=float, help='pink noise in dB.')
 
 def _noise_scaler(signal_power, snr):
     return (signal_power / 10 ** (snr / 10)).sqrt()
- 
+
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -52,8 +53,8 @@ if __name__ == '__main__':
     for id in test_ids:
         print("\n -- loading", id)
         audio_path = os.path.join(args.root, 'test_data', str(id) + '.wav')
-        print( ' ', audio_path)
-        y, sr = load( audio_path, normalization=True, channels_first=False )
+        print(' ', audio_path)
+        y, sr = load(audio_path, normalization=True, channels_first=False)
         y = y.mean(1)
         y = F.pad(y, (frame_size // 2, frame_size // 2))
         y = y[:len(y) // hopsize * hopsize].unfold(0, frame_size, hopsize)
@@ -92,9 +93,9 @@ if __name__ == '__main__':
     valid_labels = torch.cat(valid_labels, 0)
 
     valid_set = TensorDataset(valid_data, valid_labels)
-    valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=1 )
+    valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=1)
     test_set = TensorDataset(test_data, test_labels)
-    test_loader = DataLoader(test_set, batch_size=batch_size, num_workers=1 )
+    test_loader = DataLoader(test_set, batch_size=batch_size, num_workers=1)
 
     y_true = []
     y_score = []
@@ -108,7 +109,7 @@ if __name__ == '__main__':
 
             outputs = torch.sigmoid(net(inputs))
             y_score += [outputs.detach().cpu().numpy()]
-            
+
     y_score = np.vstack(y_score).flatten()
     y_true = np.vstack(y_true).flatten()
 
@@ -118,7 +119,7 @@ if __name__ == '__main__':
 
     res = minimize_scalar(threshold, bounds=(0, 1), method='bounded')
     thresh = res.x
-    print( " -- threshold: %.4f \n" % thresh )
+    print(" -- threshold: %.4f \n" % thresh)
 
     y_true = []
     y_score = []
@@ -135,15 +136,16 @@ if __name__ == '__main__':
 
     y_score = np.vstack(y_score).flatten()
     y_true = np.vstack(y_true).flatten()
-    print( "    average precision: %.4f" % average_precision_score(y_true, y_score))
-    print( "    precision: %.4f" % precision_recall_fscore_support(y_true, y_score > thresh, average='binary')[0] )
-    print( "    recall: %.4f" % precision_recall_fscore_support(y_true, y_score > thresh, average='binary')[1] )
-    print( "    f-score: %.4f" % precision_recall_fscore_support(y_true, y_score > thresh, average='binary')[2] )
+    print("    average precision: %.4f" %
+          average_precision_score(y_true, y_score))
+    print("    precision: %.4f" % precision_recall_fscore_support(
+        y_true, y_score > thresh, average='binary')[0])
+    print("    recall: %.4f" % precision_recall_fscore_support(
+        y_true, y_score > thresh, average='binary')[1])
+    print("    f-score: %.4f" % precision_recall_fscore_support(y_true,
+                                                                y_score > thresh, average='binary')[2])
 
     t_cost = time() - t_start
-    t_cost = timedelta( seconds=t_cost )
+    t_cost = timedelta(seconds=t_cost)
 
     print("\n -- RunTime: %s \n" % t_cost)
-
-
-
