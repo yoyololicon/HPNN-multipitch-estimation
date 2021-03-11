@@ -16,6 +16,7 @@ from datetime import timedelta
 from datetime import date
 
 parser = argparse.ArgumentParser()
+
 parser.add_argument('--root', type=str, default='Datasets/musicnet/')
 parser.add_argument('--model_path', type=str, default='Models/musicnet_aug_6L.pth')
 parser.add_argument('--framesize', type=int, default=16384)
@@ -25,7 +26,7 @@ parser.add_argument('--snr', type=float, help='pink noise in dB.')
 
 def _noise_scaler(signal_power, snr):
     return (signal_power / 10 ** (snr / 10)).sqrt()
- 
+
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -53,6 +54,7 @@ if __name__ == '__main__':
         print("\n -- loading", id)
         audio_path = os.path.join(args.root, 'test_data', str(id) + '.wav')
         # print( ' ', audio_path)
+
         y, sr = load(audio_path, normalization=True, channels_first=False)
         y = y.mean(1)
         y = F.pad(y, (frame_size // 2, frame_size // 2))
@@ -108,7 +110,7 @@ if __name__ == '__main__':
 
             outputs = torch.sigmoid(net(inputs))
             y_score += [outputs.detach().cpu().numpy()]
-            
+
     y_score = np.vstack(y_score).flatten()
     y_true = np.vstack(y_true).flatten()
 
@@ -118,7 +120,7 @@ if __name__ == '__main__':
 
     res = minimize_scalar(threshold, bounds=(0, 1), method='bounded')
     thresh = res.x
-    print( " -- threshold: %.4f \n" % thresh )
+    print(" -- threshold: %.4f \n" % thresh)
 
     y_true = []
     y_score = []
@@ -135,13 +137,16 @@ if __name__ == '__main__':
 
     y_score = np.vstack(y_score).flatten()
     y_true = np.vstack(y_true).flatten()
+
     print( "    average precision: %.4f" % average_precision_score(y_true, y_score),
            "    precision: %.4f" % precision_recall_fscore_support(y_true, y_score > thresh, average='binary')[0],
            "    recall: %.4f" % precision_recall_fscore_support(y_true, y_score > thresh, average='binary')[1],
            "    f-score: %.4f" % precision_recall_fscore_support(y_true, y_score > thresh, average='binary')[2],
            sep='\n')
 
+
     t_cost = time() - t_start
-    t_cost = timedelta( seconds=t_cost )
+    t_cost = timedelta(seconds=t_cost)
+
 
     print("\n -- RunTime: %s \n" % t_cost)

@@ -13,7 +13,7 @@ This repository is the code companion with the paper:
 
 ## Dependencies
 
-* pytorch 1.0.1 / cuda 10.0 / driver-410
+* pytorch 1.8.0 / cuda 11.1.1 / driver-460
 * torchaudio 0.2
 * intervaltree
 * pretty_midi
