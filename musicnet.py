@@ -49,9 +49,11 @@ def _init_weight(m):
         if type(m.bias) == torch.Tensor:
             m.bias.data.fill_(0)
 
+
 def _remove_weight_norms(m):
     if hasattr(m, 'weight_g'):
         nn.utils.remove_weight_norm(m)
+
 
 def _add_weight_norms(m):
     if hasattr(m, 'weight'):
@@ -92,8 +94,10 @@ if __name__ == '__main__':
     valid_set = MusicNet(args.root, type='valid', preprocess=False, normalize=True, window=frame_size,
                          epoch_size=batch_size * 10)
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=0)
-    valid_loader = DataLoader(valid_set, batch_size=batch_size, num_workers=0)
+    train_loader = DataLoader(
+        train_set, batch_size=batch_size, num_workers=2, pin_memory=True)
+    valid_loader = DataLoader(
+        valid_set, batch_size=batch_size, num_workers=2, pin_memory=True)
 
     print('\n ==> Building model...\n')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
