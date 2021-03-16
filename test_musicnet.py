@@ -55,7 +55,7 @@ if __name__ == '__main__':
         audio_path = os.path.join(args.root, 'test_data', str(id) + '.wav')
         # print( ' ', audio_path)
 
-        y, sr = load(audio_path, normalization=True, channels_first=False)
+        y, sr = load(audio_path, normalize=True, channels_first=False)
         y = y.mean(1)
         y = F.pad(y, (frame_size // 2, frame_size // 2))
         y = y[:len(y) // hopsize * hopsize].unfold(0, frame_size, hopsize)

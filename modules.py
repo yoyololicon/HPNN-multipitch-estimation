@@ -18,10 +18,10 @@ class PPower(nn.Module):
                 1., 0.1), requires_grad=trainable)
 
     def forward(self, input: Tensor):
-        output = torch.zeros_like(input)
-        mask = torch.where(input > 0)
-        output[mask] = input[mask].pow(self.lamda)
-        return output
+        mask = input.gt(0.).float()
+        inv_mask = 1 - mask
+        input = input * mask + inv_mask
+        return input.pow(self.lamda) - inv_mask
 
 
 class gamma_layer(nn.Module):
