@@ -1,5 +1,7 @@
 import torch
+from torch.functional import Tensor
 import torch.nn as nn
+import torch.fft as fft
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 import numpy as np
@@ -9,15 +11,17 @@ class PPower(nn.Module):
     def __init__(self, init=None, trainable=True):
         super().__init__()
         if init:
-            self.lamda = Parameter(torch.Tensor([init]), requires_grad=trainable)
+            self.lamda = Parameter(torch.Tensor(
+                [init]), requires_grad=trainable)
         else:
-            self.lamda = Parameter(torch.Tensor(1).normal_(1., 0.1), requires_grad=trainable)
+            self.lamda = Parameter(torch.Tensor(1).normal_(
+                1., 0.1), requires_grad=trainable)
 
-    def forward(self, input):
-        mask = input.gt(0.).float()
-        inv_mask = 1 - mask
-        input = input * mask + inv_mask
-        return input.pow(self.lamda) - inv_mask
+    def forward(self, input: Tensor):
+        output = torch.zeros_like(input)
+        mask = torch.where(input > 0)
+        output[mask] = input[mask].pow(self.lamda)
+        return output
 
 
 class gamma_layer(nn.Module):
@@ -30,7 +34,8 @@ class gamma_layer(nn.Module):
             self.bias.requires_grad = False
 
     def forward(self, x):
-        x = torch.rfft(x, 1, normalized=True, onesided=False)[..., 0]
+        x = fft.fft(x, norm="ortho").real
+        # x = torch.rfft(x, 1, normalized=True, onesided=False)[..., 0]
         x[..., :self.idx] = x[..., -self.idx:] = 0
         return self.g(x + self.bias)
 
@@ -41,7 +46,8 @@ class MLC(nn.Module):
         self.window_size = in_channels
         self.hop_size = hop_size
 
-        self.window = nn.Parameter(torch.hann_window(in_channels), requires_grad=False)
+        self.window = nn.Parameter(torch.hann_window(
+            in_channels), requires_grad=False)
         self.hpi = int(Hipass_f * in_channels / sr) + 1
         self.lpi = int(Lowpass_t * sr / 1000) + 1
         self.g0 = PPower(init=g[0], trainable=trainable)
@@ -51,17 +57,21 @@ class MLC(nn.Module):
         layers = []
         for d, gamma in enumerate(g[1:]):
             if d % 2:
-                layers.append(gamma_layer(gamma, self.hpi, bias=False, trainable=trainable))
+                layers.append(gamma_layer(gamma, self.hpi,
+                                          bias=False, trainable=trainable))
                 self.num_spec += 1
             else:
-                layers.append(gamma_layer(gamma, self.lpi, bias=False, trainable=trainable))
+                layers.append(gamma_layer(gamma, self.lpi,
+                                          bias=False, trainable=trainable))
                 self.num_ceps += 1
 
         self.mlc_layers = nn.ModuleList(layers)
 
     def forward(self, x):
         x = torch.stft(x, self.window_size, self.hop_size, window=self.window, center=False, normalized=True,
-                       onesided=False).pow(2).sum(3).transpose(1, 2)
+                       onesided=False, return_complex=True).abs().transpose(1, 2)
+        x *= x
+
         spec = self.g0(x)
         ceps = torch.zeros_like(spec)
         for d, layer in enumerate(self.mlc_layers):
@@ -98,13 +108,14 @@ class Sparse_Pitch_Profile(nn.Module):
         # each group will center at the piano pitch number and the extra pitch range
         # E.g., division = 2, midi_num = [20.25, 20.75, 21.25, ....]
         #       dividion = 3, midi_num = [20.33, 20.67, 21, 21.33, ...]
-        midi_num = np.arange(20.5 - step / 2 - harms_range, 108.5 + step + harms_range, step)
-        # self.midi_num = midi_num 
+        midi_num = np.arange(20.5 - step / 2 - harms_range,
+                             108.5 + step + harms_range, step)
+        # self.midi_num = midi_num
 
-        fd = 440 * np.power(2, (midi_num - 69) / 12) 
+        fd = 440 * np.power(2, (midi_num - 69) / 12)
         # self.fd = fd
 
-        self.effected_dim = in_channels // 2 + 1  
+        self.effected_dim = in_channels // 2 + 1
         # // 2 : the spectrum/ cepstrum are symmetric
 
         x = np.arange(self.effected_dim)
@@ -114,13 +125,14 @@ class Sparse_Pitch_Profile(nn.Module):
 
         inter_value = np.array([0, 1, 0])
         idxs = np.digitize(freq_f, fd)
- 
+
         cols, rows, values = [], [], []
         for i in range(harms_range * division, (88 + 2 * harms_range) * division):
             idx = np.where((idxs == i + 1) | (idxs == i + 2))[0]
             c = idx
             r = np.broadcast_to(i - harms_range * division, idx.shape)
-            x = np.interp(freq_f[idx], fd[i:i + 3], inter_value).astype(np.float32)
+            x = np.interp(freq_f[idx], fd[i:i + 3],
+                          inter_value).astype(np.float32)
             if norm and len(idx):
                 # x /= (fd[i + 2] - fd[i]) / sr * in_channels
                 x /= x.sum()  # energy normalization
@@ -137,9 +149,11 @@ class Sparse_Pitch_Profile(nn.Module):
             rows.append(r)
             values.append(x)
 
-        cols, rows, values = np.concatenate(cols), np.concatenate(rows), np.concatenate(values)
+        cols, rows, values = np.concatenate(
+            cols), np.concatenate(rows), np.concatenate(values)
         self.filters_f_idx = (rows, cols)
-        self.filters_f_values = nn.Parameter(torch.tensor(values), requires_grad=False)
+        self.filters_f_values = nn.Parameter(
+            torch.tensor(values), requires_grad=False)
 
         idxs = np.digitize(freq_t, fd)
         cols, rows, values = [], [], []
@@ -147,7 +161,8 @@ class Sparse_Pitch_Profile(nn.Module):
             idx = np.where((idxs == i + 1) | (idxs == i + 2))[0]
             c = idx + 1
             r = np.broadcast_to(i, idx.shape)
-            x = np.interp(freq_t[idx], fd[i:i + 3], inter_value).astype(np.float32)
+            x = np.interp(freq_t[idx], fd[i:i + 3],
+                          inter_value).astype(np.float32)
             if norm and len(idx):
                 # x /= (1 / fd[i] - 1 / fd[i + 2]) * sr
                 x /= x.sum()
@@ -162,19 +177,28 @@ class Sparse_Pitch_Profile(nn.Module):
             rows.append(r)
             values.append(x)
 
-        cols, rows, values = np.concatenate(cols), np.concatenate(rows), np.concatenate(values)
+        cols, rows, values = np.concatenate(
+            cols), np.concatenate(rows), np.concatenate(values)
         self.filters_t_idx = (rows, cols)
-        self.filters_t_values = nn.Parameter(torch.tensor(values), requires_grad=False)
-        self.filter_size = torch.Size(((88 + harms_range) * division, self.effected_dim))
+        self.filters_t_values = nn.Parameter(
+            torch.tensor(values), requires_grad=False)
+        self.filter_size = torch.Size(
+            ((88 + harms_range) * division, self.effected_dim))
 
     def forward(self, ceps, spec):
-        ceps, spec = ceps[..., :self.effected_dim], spec[..., :self.effected_dim]
+        ceps, spec = ceps[..., :self.effected_dim], spec[...,
+                                                         :self.effected_dim]
         batch_dim, steps, _ = ceps.size()
-        filter_f = torch.sparse_coo_tensor(self.filters_f_idx, self.filters_f_values, self.filter_size)
-        filter_t = torch.sparse_coo_tensor(self.filters_t_idx, self.filters_t_values, self.filter_size)
-        ppt = filter_t @ ceps.transpose(0, 2).contiguous().view(self.effected_dim, -1)
-        ppf = filter_f @ spec.transpose(0, 2).contiguous().view(self.effected_dim, -1)
-        return ppt.view(-1, steps, batch_dim).transpose(0, 2), ppf.view(-1, steps, batch_dim).transpose(0, 2)
+        filter_f = torch.sparse_coo_tensor(
+            self.filters_f_idx, self.filters_f_values, self.filter_size)
+        filter_t = torch.sparse_coo_tensor(
+            self.filters_t_idx, self.filters_t_values, self.filter_size)
+
+        ppt = (filter_t @ ceps.reshape(-1, self.effected_dim).t()
+               ).t().reshape(batch_dim, steps, -1)
+        ppf = (filter_f @ spec.reshape(-1, self.effected_dim).t()
+               ).t().reshape(batch_dim, steps, -1)
+        return ppt, ppf
 
 
 class CFP(nn.Module):
@@ -182,7 +206,8 @@ class CFP(nn.Module):
         super().__init__()
         self.harmonics_filter = nn.Sequential(nn.Conv2d(2, k1, (1, harms_range * division + 1), bias=False),
                                               nn.ReLU(inplace=True),
-                                              nn.Conv2d(k1, k2, (num_regions, 1), bias=False),
+                                              nn.Conv2d(
+                                                  k1, k2, (num_regions, 1), bias=False),
                                               nn.ReLU(inplace=True),
                                               nn.Conv2d(k2, 1, (1, division), stride=(1, division)))
 
@@ -195,11 +220,12 @@ class CFP_MaxPool(nn.Module):
         super().__init__()
         self.harmonics_filter = nn.Sequential(nn.Conv2d(2, k1, (1, harms_range * division + 1), bias=False),
                                               nn.ReLU(inplace=True),
-                                              nn.Conv2d(k1, k2, (num_regions, 1), bias=False),
+                                              nn.Conv2d(
+                                                  k1, k2, (num_regions, 1), bias=False),
                                               nn.ReLU(inplace=True),
-                                              nn.MaxPool2d((1, division), stride=(1, division)),
+                                              nn.MaxPool2d(
+                                                  (1, division), stride=(1, division)),
                                               nn.Conv2d(k2, 1, 1))
 
     def forward(self, ppt, ppf):
         return self.harmonics_filter(torch.stack((ppt, ppf), 1)).squeeze()
-
