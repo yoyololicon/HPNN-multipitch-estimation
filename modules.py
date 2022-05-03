@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.fft import rfft, fft
 from torch.nn.parameter import Parameter
 import numpy as np
 
@@ -30,7 +31,7 @@ class gamma_layer(nn.Module):
             self.bias.requires_grad = False
 
     def forward(self, x):
-        x = torch.rfft(x, 1, normalized=True, onesided=False)[..., 0]
+        x = fft(x, norm="ortho").real
         x[..., :self.idx] = x[..., -self.idx:] = 0
         return self.g(x + self.bias)
 
@@ -41,7 +42,7 @@ class MLC(nn.Module):
         self.window_size = in_channels
         self.hop_size = hop_size
 
-        self.window = nn.Parameter(torch.hann_window(in_channels), requires_grad=False)
+        self.register_buffer('window', torch.hann_window(in_channels))
         self.hpi = int(Hipass_f * in_channels / sr) + 1
         self.lpi = int(Lowpass_t * sr / 1000) + 1
         self.g0 = PPower(init=g[0], trainable=trainable)
@@ -61,7 +62,10 @@ class MLC(nn.Module):
 
     def forward(self, x):
         x = torch.stft(x, self.window_size, self.hop_size, window=self.window, center=False, normalized=True,
-                       onesided=False).pow(2).sum(3).transpose(1, 2)
+                       onesided=False, return_complex=True).abs().square().transpose(1, 2)
+        # x = x.unfold(1, self.window_size, self.hop_size) * self.window
+        # x = fft(x, norm="ortho").abs().square()
+
         spec = self.g0(x)
         ceps = torch.zeros_like(spec)
         for d, layer in enumerate(self.mlc_layers):
@@ -138,8 +142,8 @@ class Sparse_Pitch_Profile(nn.Module):
             values.append(x)
 
         cols, rows, values = np.concatenate(cols), np.concatenate(rows), np.concatenate(values)
-        self.filters_f_idx = (rows, cols)
-        self.filters_f_values = nn.Parameter(torch.tensor(values), requires_grad=False)
+        self.register_buffer('filters_f_idx', torch.stack((torch.tensor(rows), torch.tensor(cols)), 0))
+        self.register_buffer('filters_f_values', torch.tensor(values))
 
         idxs = np.digitize(freq_t, fd)
         cols, rows, values = [], [], []
@@ -163,8 +167,8 @@ class Sparse_Pitch_Profile(nn.Module):
             values.append(x)
 
         cols, rows, values = np.concatenate(cols), np.concatenate(rows), np.concatenate(values)
-        self.filters_t_idx = (rows, cols)
-        self.filters_t_values = nn.Parameter(torch.tensor(values), requires_grad=False)
+        self.register_buffer('filters_t_idx', torch.stack((torch.tensor(rows), torch.tensor(cols)), 0))
+        self.register_buffer('filters_t_values', torch.tensor(values))
         self.filter_size = torch.Size(((88 + harms_range) * division, self.effected_dim))
 
     def forward(self, ceps, spec):
